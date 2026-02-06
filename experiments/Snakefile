@@ -1,0 +1,120 @@
+"""
+Execute snakemake, from the login node, by 
+    mamba activate ctxbandit
+    nohup snakemake --profile slurm_profile > snakemake.out 2>&1 &
+"""
+
+single_csv = [
+    f"single/{policy}/csv/{100*batch:04d}-{100*batch+99:04d}.csv"
+    for policy in ("baseline", "new")
+    for batch in range(100)
+]
+
+joint_csv = [
+    f"joint/csv/{5*batch:03d}-{5*batch+4:03d}.csv"
+    for batch in range(100)
+]
+
+difference_csv = [
+    f"difference/csv/{50*batch:03d}-{50*batch+49:03d}.csv"
+    for batch in range(10)
+]
+
+viz_pickle = "viz/viz_joint_diff.pickle"
+
+
+#######################################################################################
+
+rule all:
+    input:
+        single_csv,
+        joint_csv,
+        difference_csv,
+        viz_pickle, 
+
+
+
+rule run_single:
+    output: 
+        "single/{policy}/csv/{replicate_start}-{replicate_end}.csv"
+    resources:
+        cpus_per_task = 1, 
+        mem = "4G", 
+        runtime = "1d", 
+        slurm_extra = lambda wc : (
+            f"-o single/{wc.policy}/out/{wc.replicate_start}-{wc.replicate_end}_%j.out"
+        )
+    conda:
+        "ctxbandit"
+    shell:
+        """
+        python -u single/inference_single.py \
+                --policy {wildcards.policy} \
+                --replicate_start {wildcards.replicate_start} \
+                --replicate_end {wildcards.replicate_end} \
+                --output_path {output}
+        my-job-stats -a -n -s
+        """
+
+
+rule run_joint:
+    output: 
+        "joint/csv/{replicate_start}-{replicate_end}.csv"
+    resources:
+        cpus_per_task = 10, 
+        mem = "40G", 
+        runtime = "1d", 
+        slurm_extra = lambda wc : (
+            f"-o joint/out/{wc.replicate_start}-{wc.replicate_end}_%j.out"
+        )
+    conda:
+        "ctxbandit"
+    shell:
+        """
+        python -u joint/inference_joint.py \
+                --replicate_start {wildcards.replicate_start} \
+                --replicate_end {wildcards.replicate_end} \
+                --output_path {output}
+        my-job-stats -a -n -s
+        """
+
+
+rule run_difference:
+    output: 
+        "difference/csv/{replicate_start}-{replicate_end}.csv"
+    resources:
+        cpus_per_task = 1, 
+        mem = "4G", 
+        runtime = "1d", 
+        slurm_extra = lambda wc : (
+            f"-o difference/out/{wc.replicate_start}-{wc.replicate_end}_%j.out"
+        )
+    conda:
+        "ctxbandit"
+    shell:
+        """
+        python -u difference/inference_difference.py \
+                --replicate_start {wildcards.replicate_start} \
+                --replicate_end {wildcards.replicate_end} \
+                --output_path {output}
+        my-job-stats -a -n -s
+        """
+
+
+rule run_viz:
+    output: 
+        viz_pickle
+    resources:
+        cpus_per_task = 10, 
+        mem = "10G", 
+        runtime = "15m", 
+        slurm_extra = "-o viz/viz_joint_diff_%j.out", 
+    conda:
+        "ctxbandit"
+    shell:
+        """
+        python -u viz/viz_joint_diff.py \
+                --output_path {output}
+        my-job-stats -a -n -s
+        """
+
